@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { BRAND } from "@/lib/builder/brand";
-import { SECTION_CATALOG } from "@/lib/builder/types";
+import { LAYOUT_PRESETS, SECTION_CATALOG } from "@/lib/builder/types";
 import { TEMPLATES } from "@/lib/builder/template";
 
 /**
@@ -20,7 +20,8 @@ export const metadata: Metadata = {
 const STEPS = [
   { no: "01", title: "골격을 고릅니다", desc: "여섯 가지 템플릿 중 하나로 시작합니다. 빈 화면에서 시작하지 않습니다." },
   { no: "02", title: "글자를 누르고 고칩니다", desc: "화면의 글자를 직접 눌러 그 자리에서 고칩니다. 색과 글꼴은 견본으로 한 번에 바꿉니다." },
-  { no: "03", title: "HTML 한 장으로 내보냅니다", desc: "파일 하나만 있으면 어디에 올려도 그대로 뜹니다. 빌더가 없어도 결과물은 남습니다." },
+  { no: "03", title: "뼈대와 색을 고릅니다", desc: "레이아웃 여섯 가지와 테마 다섯 가지를 눌러 보며 조합합니다. 내용은 그대로, 인상만 바뀝니다." },
+  { no: "04", title: "내보내거나 에이전트에게 맡깁니다", desc: "HTML 한 장으로 내려받거나, 배포 꾸러미를 AI 에이전트에게 건네 올리게 합니다." },
 ];
 
 export default function Home() {
@@ -67,6 +68,10 @@ export default function Home() {
             <span>시작 템플릿</span>
           </li>
           <li>
+            <strong>{LAYOUT_PRESETS.length}</strong>
+            <span>레이아웃</span>
+          </li>
+          <li>
             <strong>{SECTION_CATALOG.length}</strong>
             <span>구역 부품</span>
           </li>
@@ -91,8 +96,15 @@ export default function Home() {
           <article>
             <h3>구역 {SECTION_CATALOG.length}가지를 쌓아서</h3>
             <p>
-              상단 메뉴·히어로·카드·단계 흐름·비교표·목록·갤러리·글·배너·게시판·푸터를
-              골라 넣고 순서를 바꿉니다.
+              상단 메뉴·히어로·카드·단계 흐름·비교표·목록·갤러리·글·배너·게시판·FAQ·문의 폼·오시는
+              길·동영상·푸터를 골라 넣고 순서를 바꿉니다.
+            </p>
+          </article>
+          <article>
+            <h3>뼈대는 레이아웃 {LAYOUT_PRESETS.length}가지로</h3>
+            <p>
+              기본형·박스형·사이드 메뉴형·센터형·분할형·포털형. 내용은 그대로 두고 골격만 바꿉니다.
+              테마와 조합하면 서른 가지 인상이 됩니다.
             </p>
           </article>
           <article>
@@ -100,6 +112,13 @@ export default function Home() {
             <p>
               테마 견본을 누르면 사이트 전체 색이 한 번에 바뀝니다. 텐에이아이·중앙부처·지자체·교육·모노
               다섯 가지에서 고르거나 색을 직접 지정합니다.
+            </p>
+          </article>
+          <article>
+            <h3>사진이 없어도 비지 않게</h3>
+            <p>
+              아이콘 50여 종, 히어로 삽화 8종, 배경 무늬, 샘플 사진이 도구 안에 있습니다. 전부 파일
+              안에 그림으로 들어가 바깥 서버가 필요 없습니다.
             </p>
           </article>
           <article>
@@ -112,14 +131,21 @@ export default function Home() {
           <article>
             <h3>게시판도 파일 안에서</h3>
             <p>
-              공지·자료실 구역을 넣으면 내보낸 HTML 안에서 글쓰기가 그대로 돕니다. 글은
-              보는 사람의 브라우저에 남습니다.
+              공지·자료실·소식 게시판을 넣으면 내보낸 HTML 안에서 말머리·검색·쪽 나누기·글쓰기가
+              그대로 돕니다. 방문자가 쓴 글은 그 사람의 브라우저에 남습니다.
+            </p>
+          </article>
+          <article>
+            <h3>올리는 일은 AI 에이전트에게</h3>
+            <p>
+              「퍼블리시」로 index.html·site.json·PUBLISH.md 가 든 배포 꾸러미를 받아 Claude Code 같은
+              에이전트에게 건네면 배포까지 해 줍니다. 웹훅으로 자체 서버와도 잇습니다.
             </p>
           </article>
           <article>
             <h3>작업은 저장하고 이어서</h3>
             <p>
-              작업물은 브라우저에 자동으로 저장되고, JSON 파일로 내려받아 다른 기기에서
+              작업물은 브라우저에 자동으로 저장되고, JSON 이나 내보낸 HTML 을 다시 불러와 다른 기기에서
               이어서 하실 수 있습니다.
             </p>
           </article>

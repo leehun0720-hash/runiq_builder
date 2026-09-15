@@ -2,24 +2,35 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  LAYOUT_PRESETS,
   SECTION_CATALOG,
   THEME_PRESETS,
+  layoutOf,
   newId,
   newSection,
   type Background,
+  type Card,
+  type FooterLink,
+  type LayoutId,
+  type MenuItem,
   type Section,
+  type Step,
   type SectionKind,
   type SiteDoc,
   type Theme,
 } from "@/lib/builder/types";
-import { renderSite, themeVars, BUILDER_CSS } from "@/lib/builder/render";
-import { downloadName, exportHtml, parseDoc, serializeDoc } from "@/lib/builder/export";
+import { anchorOf, renderSite, themeVars, BUILDER_CSS } from "@/lib/builder/render";
+import { downloadName, exportHtml, parseAny, serializeDoc } from "@/lib/builder/export";
 import { TEMPLATES, starterDoc, blankDoc } from "@/lib/builder/template";
 import { BRAND } from "@/lib/builder/brand";
 import { HELP_TOPICS, MANUAL, TOUR_STEPS, type HelpId, type ManualBlock } from "@/lib/builder/help";
+import { ICONS, ICON_IDS, ILLUSTRATIONS, PATTERNS, iconSvg, illustrationDataUrl, illustrationSvg, samplePhoto } from "@/lib/builder/art";
+import { agentPrompt, buildBundle, buildWebhookPayload, makeZip, slug } from "@/lib/builder/publish";
 import "./builder.css";
 
 const STORAGE_KEY = "tenai-builder-doc";
+/** 연동 주소(웹훅)는 사이트 내용이 아니라 이 컴퓨터의 설정이다 — 문서와 따로 둔다 */
+const WEBHOOK_KEY = "tenai-builder-webhook";
 /** 따라 하기를 이미 마쳤는지 — 처음 오신 분에게만 저절로 뜬다 */
 const TOUR_KEY = "tenai-builder-tour";
 const HISTORY_LIMIT = 60;
@@ -77,8 +88,8 @@ async function fileToDataUrl(file: File, spec: ResizeSpec = PHOTO_SPEC): Promise
   return canvas.toDataURL(spec.mime, spec.quality);
 }
 
-function download(name: string, content: string, type: string) {
-  const url = URL.createObjectURL(new Blob([content], { type }));
+function download(name: string, content: string | Uint8Array, type: string) {
+  const url = URL.createObjectURL(new Blob([content as BlobPart], { type }));
   const a = document.createElement("a");
   a.href = url;
   a.download = name;
@@ -176,12 +187,19 @@ function ImagePicker({
   value,
   onChange,
   mode = "photo",
+  theme,
+  seed,
 }: {
   value: string;
   onChange: (v: string) => void;
   mode?: "photo" | "logo";
+  /** 삽화를 테마 색으로 그리기 위해 — 사진 자리에서만 쓴다 */
+  theme?: Theme;
+  /** 샘플 사진 씨앗 — 같은 자리는 늘 같은 사진 */
+  seed?: string;
 }) {
   const [busy, setBusy] = useState(false);
+  const [artOpen, setArtOpen] = useState(false);
   const spec = mode === "logo" ? LOGO_SPEC : PHOTO_SPEC;
   return (
     <span className="bx-image">
@@ -215,18 +233,178 @@ function ImagePicker({
             }}
           />
         </label>
+        {mode === "photo" && (
+          <>
+            <button type="button" className="bx-mini" title="임시로 채우는 사진 — 나중에 바꾸십시오" onClick={() => onChange(samplePhoto(seed ?? newId("s")))}>
+              샘플 사진
+            </button>
+            {theme && (
+              <button type="button" className={`bx-mini ${artOpen ? "is-on" : ""}`} onClick={() => setArtOpen((o) => !o)}>
+                삽화
+              </button>
+            )}
+          </>
+        )}
         {value && (
           <button type="button" className="bx-mini" onClick={() => onChange("")}>
             지우기
           </button>
         )}
       </span>
+      {artOpen && theme && (
+        <span className="bx-artgrid">
+          {ILLUSTRATIONS.map((art) => (
+            <button
+              key={art.id}
+              type="button"
+              title={art.name}
+              onClick={() => {
+                onChange(illustrationDataUrl(art.id, theme.accent, theme.inkStrong, theme.paperDeep));
+                setArtOpen(false);
+              }}
+              dangerouslySetInnerHTML={{ __html: illustrationSvg(art.id, theme.accent, theme.inkStrong) }}
+            />
+          ))}
+        </span>
+      )}
       {mode === "logo" && value && (
         /* eslint-disable-next-line @next/next/no-img-element */
         <img className="bx-logo-preview" src={value} alt="올린 로고 미리보기" />
       )}
     </span>
   );
+}
+
+/**
+ * 링크 고르기 — 같은 페이지의 구역, 또는 직접 적는 주소.
+ * 구역을 고르면 「#s-아이디」가 들어가고, 그 구역이 지워지면 링크는 그냥 죽은 닻이
+ * 되어 아무 데도 가지 않는다(사이트가 깨지지는 않는다).
+ */
+function LinkPicker({
+  value,
+  onChange,
+  sections,
+}: {
+  value: string | undefined;
+  onChange: (v: string | undefined) => void;
+  sections: Section[];
+}) {
+  const v = value ?? "";
+  const matched = sections.find((s) => anchorOf(s) === v);
+  const mode = !v ? "" : matched ? "section" : "custom";
+  return (
+    <span className="bx-link">
+      <select
+        value={mode === "section" ? v : mode}
+        onChange={(e) => {
+          const next = e.target.value;
+          if (!next) onChange(undefined);
+          else if (next === "custom") onChange(v.startsWith("#") || !v ? "https://" : v);
+          else onChange(next);
+        }}
+      >
+        <option value="">링크 없음</option>
+        <optgroup label="이 페이지의 구역으로">
+          {sections
+            .filter((s) => s.kind !== "header")
+            .map((s) => (
+              <option key={s.id} value={anchorOf(s)}>
+                {s.name}
+              </option>
+            ))}
+        </optgroup>
+        <option value="custom">직접 입력 (주소 · 메일 · 전화)</option>
+      </select>
+      {mode === "custom" && (
+        <input value={v} placeholder="https://… / mailto:… / tel:…" onChange={(e) => onChange(e.target.value)} />
+      )}
+    </span>
+  );
+}
+
+/** 아이콘 고르기 — 이름을 누르면 격자가 펼쳐진다 */
+function IconPicker({ value, onChange }: { value: string | undefined; onChange: (v: string | undefined) => void }) {
+  const [open, setOpen] = useState(false);
+  const current = value && ICONS[value] ? ICONS[value].name : "";
+  return (
+    <span className="bx-iconpick">
+      <button type="button" className="bx-mini bx-iconpick-btn" onClick={() => setOpen((o) => !o)}>
+        {value && ICONS[value] ? <i dangerouslySetInnerHTML={{ __html: iconSvg(value, "bx-ico") }} /> : <i className="bx-ico-empty" />}
+        {current || "아이콘 없음"}
+      </button>
+      {value && (
+        <button type="button" className="bx-mini" onClick={() => onChange(undefined)}>
+          지우기
+        </button>
+      )}
+      {open && (
+        <span className="bx-icongrid">
+          {ICON_IDS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={id === value ? "is-on" : ""}
+              title={ICONS[id].name}
+              onClick={() => {
+                onChange(id);
+                setOpen(false);
+              }}
+              dangerouslySetInnerHTML={{ __html: iconSvg(id, "bx-ico") }}
+            />
+          ))}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** 히어로 삽화 고르기 — 테마 색으로 미리 그려 보여 준다 */
+function ArtPicker({ value, onChange, theme }: { value: string | undefined; onChange: (v: string | undefined) => void; theme: Theme }) {
+  return (
+    <span className="bx-artgrid bx-artgrid--pick">
+      <button type="button" className={!value ? "is-on bx-art-none" : "bx-art-none"} onClick={() => onChange(undefined)}>
+        없음
+      </button>
+      {ILLUSTRATIONS.map((art) => (
+        <button
+          key={art.id}
+          type="button"
+          className={art.id === value ? "is-on" : ""}
+          title={art.name}
+          onClick={() => onChange(art.id)}
+          dangerouslySetInnerHTML={{ __html: illustrationSvg(art.id, theme.accent, theme.inkStrong) }}
+        />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * 캔버스에서 고친 여러 줄 글을 문서의 글로 되돌린다.
+ * 글 구역 본문은 「## 소제목」「- 목록」 표식을 살려야 하므로 요소를 보고 되짚는다.
+ */
+function domToText(el: HTMLElement): string {
+  const blocks: string[] = [];
+  for (const node of Array.from(el.childNodes)) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const t = node.textContent?.trim();
+      if (t) blocks.push(t);
+      continue;
+    }
+    if (!(node instanceof HTMLElement)) continue;
+    const tag = node.tagName.toLowerCase();
+    if (tag === "h3") blocks.push(`## ${node.innerText.trim()}`);
+    else if (tag === "ul" || tag === "ol")
+      blocks.push(
+        Array.from(node.querySelectorAll("li"))
+          .map((li) => `- ${li.innerText.trim()}`)
+          .join("\n")
+      );
+    else if (tag === "br") continue;
+    else blocks.push(node.innerText.replace(/\u00a0/g, " ").trim());
+  }
+  const joined = blocks.filter(Boolean).join("\n\n");
+  return joined || el.innerText.replace(/\u00a0/g, " ").trim();
 }
 
 /** 목록형 속성(카드·단계·글 등) 공통 틀 */
@@ -240,7 +418,7 @@ function ListEditor<T>({
   items: T[];
   onChange: (next: T[]) => void;
   make: () => T;
-  render: (item: T, set: (patch: Partial<T>) => void) => React.ReactNode;
+  render: (item: T, set: (patch: Partial<T>) => void, index: number) => React.ReactNode;
   addLabel: string;
 }) {
   return (
@@ -275,7 +453,7 @@ function ListEditor<T>({
               삭제
             </button>
           </div>
-          {render(item, (patch) => onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it))))}
+          {render(item, (patch) => onChange(items.map((it, j) => (j === i ? { ...it, ...patch } : it))), i)}
         </div>
       ))}
       <button type="button" className="bx-add-item" onClick={() => onChange([...items, make()])}>
@@ -363,8 +541,13 @@ export default function BuilderClient() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [device, setDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const [mode, setMode] = useState<"edit" | "preview">("edit");
-  const [tab, setTab] = useState<"sections" | "add" | "theme">("sections");
+  const [tab, setTab] = useState<"sections" | "add" | "layout" | "theme" | "settings">("sections");
   const [saved, setSaved] = useState("");
+  // 퍼블리시 창과 연동 주소(웹훅). 주소는 이 컴퓨터에만 남는다.
+  const [publishOpen, setPublishOpen] = useState(false);
+  const [webhook, setWebhook] = useState("");
+  const [sending, setSending] = useState<"" | "busy" | "ok" | "fail">("");
+  const [copied, setCopied] = useState(false);
   const canvasRef = useRef<HTMLDivElement>(null);
   // 사용법 — 메뉴 옆 「?」로 여는 쪽지와, 「사용법」으로 여는 전체 매뉴얼
   const [help, setHelp] = useState<{ id: HelpId; x: number; y: number } | null>(null);
@@ -397,8 +580,20 @@ export default function BuilderClient() {
       })
       .then((raw) => {
         if (!alive || !raw) return;
-        const loaded = parseDoc(raw);
+        const loaded = parseAny(raw);
         if (loaded) setDocState(loaded);
+      })
+      .catch(() => {});
+    Promise.resolve()
+      .then(() => {
+        try {
+          return localStorage.getItem(WEBHOOK_KEY) ?? "";
+        } catch {
+          return "";
+        }
+      })
+      .then((url) => {
+        if (alive && url) setWebhook(url);
       })
       .catch(() => {});
     return () => {
@@ -409,6 +604,16 @@ export default function BuilderClient() {
   useEffect(() => {
     docRef.current = doc;
   }, [doc]);
+
+  // 연동 주소는 바뀔 때마다 조용히 남긴다
+  useEffect(() => {
+    try {
+      if (webhook) localStorage.setItem(WEBHOOK_KEY, webhook);
+      else localStorage.removeItem(WEBHOOK_KEY);
+    } catch {
+      // 저장이 막혀 있으면 이번 방문에서만 쓴다
+    }
+  }, [webhook]);
 
   // 바뀔 때마다 조용히 담아 둔다 — 브라우저를 닫아도 남는다
   useEffect(() => {
@@ -447,8 +652,11 @@ export default function BuilderClient() {
       const el = editableOf(e.target);
       const path = el?.dataset.edit;
       if (!el || !path) return;
-      // 한 줄 글자로 되돌린다 — 붙여넣기로 들어온 줄바꿈·서식을 흘리지 않는다
-      const text = el.innerText.replace(/ /g, " ").replace(/\s*\n\s*/g, " ").trim();
+      // 한 줄 글자는 한 줄로 되돌린다 — 붙여넣기로 들어온 줄바꿈·서식을 흘리지 않는다.
+      // 여러 줄 글(본문·답변)은 줄바꿈을 살린다.
+      const text = el.dataset.multiline
+        ? domToText(el)
+        : el.innerText.replace(/\u00a0/g, " ").replace(/\s*\n\s*/g, " ").trim();
       const current = docRef.current;
       if (getByPath(current, path) === text) return;
       commit(setByPath(current, path, text));
@@ -525,6 +733,7 @@ export default function BuilderClient() {
     if (step.prepare === "tab:sections") setTab("sections");
     if (step.prepare === "tab:add") setTab("add");
     if (step.prepare === "tab:theme") setTab("theme");
+    if (step.prepare === "tab:layout") setTab("layout");
     if (step.prepare === "mode:edit") setMode("edit");
     if (step.prepare === "select:header") {
       setMode("edit");
@@ -536,6 +745,7 @@ export default function BuilderClient() {
     setHelp(null);
     setManualOpen(false);
     setTemplateOpen(false);
+    setPublishOpen(false);
     setTourStep(index);
   }, []);
 
@@ -604,17 +814,57 @@ export default function BuilderClient() {
 
   // 열려 있는 안내는 Esc로 닫는다
   useEffect(() => {
-    if (!help && !manualOpen && !templateOpen && tourStep === null) return;
+    if (!help && !manualOpen && !templateOpen && !publishOpen && tourStep === null) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       setHelp(null);
       setManualOpen(false);
       setTemplateOpen(false);
+      setPublishOpen(false);
       if (tourStep !== null) endTour();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [help, manualOpen, templateOpen, tourStep, endTour]);
+  }, [help, manualOpen, templateOpen, publishOpen, tourStep, endTour]);
+
+  /* ── 퍼블리시 ── */
+  const builderUrl = typeof window !== "undefined" ? window.location.origin : "";
+
+  const downloadBundle = () => {
+    const { files } = buildBundle(doc, builderUrl);
+    download(`${slug(doc.title)}-site.zip`, makeZip(files), "application/zip");
+  };
+
+  const copyPrompt = async () => {
+    const { manifest } = buildBundle(doc, builderUrl);
+    try {
+      await navigator.clipboard.writeText(agentPrompt(doc, manifest));
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1800);
+    } catch {
+      alert("복사하지 못했습니다. 브라우저가 클립보드를 막고 있습니다.");
+    }
+  };
+
+  const sendWebhook = async () => {
+    if (!/^https?:\/\//i.test(webhook)) {
+      alert("설정 탭에 연동 주소(https://…)를 먼저 적어 주십시오.");
+      setTab("settings");
+      return;
+    }
+    setSending("busy");
+    try {
+      const res = await fetch(webhook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildWebhookPayload(doc, builderUrl)),
+      });
+      setSending(res.ok ? "ok" : "fail");
+    } catch {
+      setSending("fail");
+    }
+    setTimeout(() => setSending(""), 3000);
+  };
 
   /** 「?」를 누른 자리 아래에 쪽지를 띄운다 — 패널이 잘라내지 않도록 화면 기준으로 놓는다 */
   const openHelp = useCallback((id: HelpId, anchor: HTMLElement) => {
@@ -710,7 +960,7 @@ export default function BuilderClient() {
             불러오기
             <input
               type="file"
-              accept="application/json,.json"
+              accept="application/json,.json,text/html,.html,.htm"
               hidden
               onChange={(e) => {
                 const file = e.target.files?.[0];
@@ -718,9 +968,9 @@ export default function BuilderClient() {
                 file
                   .text()
                   .then((raw) => {
-                    const loaded = parseDoc(raw);
+                    const loaded = parseAny(raw);
                     if (!loaded) {
-                      alert("빌더에서 저장한 JSON 파일이 아닙니다.");
+                      alert("빌더에서 저장한 JSON 이나 내보낸 HTML 파일이 아닙니다.");
                       return;
                     }
                     commit(loaded);
@@ -735,6 +985,12 @@ export default function BuilderClient() {
             템플릿
           </button>
           <HelpDot id="save" onOpen={openHelp} />
+        </div>
+        <div className="bx-top-group">
+          <button type="button" className="bx-publish-btn" data-tour="publish" onClick={() => setPublishOpen(true)}>
+            🚀 퍼블리시
+          </button>
+          <HelpDot id="publish" onOpen={openHelp} />
         </div>
         <button type="button" className="bx-tour-btn" onClick={() => goToTourStep(0)}>
           ▸ 따라 하기
@@ -752,7 +1008,9 @@ export default function BuilderClient() {
               [
                 ["sections", "구역"],
                 ["add", "추가"],
+                ["layout", "레이아웃"],
                 ["theme", "테마"],
+                ["settings", "설정"],
               ] as const
             ).map(([key, label]) => (
               <button key={key} type="button" className={tab === key ? "is-on" : ""} onClick={() => setTab(key)}>
@@ -825,6 +1083,62 @@ export default function BuilderClient() {
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {tab === "layout" && (
+            <div className="bx-panel">
+              <p className="bx-hint">
+                사이트의 뼈대입니다. 내용은 그대로 두고 골격만 바뀝니다.
+                <HelpDot id="tab-layout" onOpen={openHelp} />
+              </p>
+              <div className="bx-layouts">
+                {LAYOUT_PRESETS.map((l) => (
+                  <button
+                    key={l.id}
+                    type="button"
+                    className={layoutOf(doc) === l.id ? "is-on" : ""}
+                    onClick={() => commit({ ...doc, layout: l.id as LayoutId })}
+                  >
+                    <LayoutThumb id={l.id} />
+                    <strong>{l.name}</strong>
+                    <span>{l.desc}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === "settings" && (
+            <div className="bx-panel">
+              <p className="bx-hint">
+                사이트 전체에 걸리는 정보와 연동 설정입니다.
+                <HelpDot id="tab-settings" onOpen={openHelp} />
+              </p>
+              <Field label="사이트 소개 (검색 · 링크 미리보기에 뜸)">
+                <TextInput
+                  area
+                  value={doc.description ?? ""}
+                  placeholder="무엇을 하는 곳인지 한두 문장"
+                  onChange={(v) => commit({ ...doc, description: v })}
+                />
+              </Field>
+              <Field label="탭 아이콘 (파비콘)">
+                <ImagePicker mode="logo" value={doc.favicon ?? ""} onChange={(v) => commit({ ...doc, favicon: v })} />
+              </Field>
+              <h3 className="bx-group">연동</h3>
+              <Field label="연동 주소 (웹훅 · 자체 서버 · 에이전트)">
+                <input value={webhook} placeholder="https://…/publish" onChange={(e) => setWebhook(e.target.value)} />
+              </Field>
+              <p className="bx-hint">
+                「퍼블리시 → 연동 주소로 보내기」가 이 주소로 사이트 파일(index.html·site.json·manifest.json)을
+                JSON 으로 POST 합니다. 이 주소는 이 컴퓨터에만 남고 문서에는 들어가지 않습니다.
+              </p>
+              <h3 className="bx-group">문서</h3>
+              <p className="bx-hint">
+                구역 {doc.sections.length}개 · 레이아웃 {LAYOUT_PRESETS.find((l) => l.id === layoutOf(doc))?.name} · 그림{" "}
+                {(JSON.stringify(doc).match(/data:image\//g) ?? []).length}장 포함
+              </p>
             </div>
           )}
 
@@ -1019,12 +1333,24 @@ export default function BuilderClient() {
                 value={selected.background}
                 onChange={(bg) => patchSection(selectedIndex, { background: bg })}
               />
+              <Field label="무늬">
+                <Choice
+                  value={selected.pattern ?? "none"}
+                  options={PATTERNS.map((pt) => ({ value: pt.id, label: pt.name }))}
+                  onChange={(v) => patchSection(selectedIndex, { pattern: v === "none" ? undefined : v })}
+                />
+              </Field>
 
               <h3 className="bx-group">
                 내용
                 <HelpDot id="content" onOpen={openHelp} />
               </h3>
-              <SectionFields section={selected} onPatch={(patch) => patchSection(selectedIndex, patch)} />
+              <SectionFields
+                section={selected}
+                sections={doc.sections}
+                theme={doc.theme}
+                onPatch={(patch) => patchSection(selectedIndex, patch)}
+              />
             </div>
           )}
         </aside>
@@ -1120,6 +1446,86 @@ export default function BuilderClient() {
           );
         })()}
 
+      {/* 퍼블리시 — 올리는 일을 사람에게도, AI 에이전트에게도 맡길 수 있게 */}
+      {publishOpen && (
+        <div className="bx-manual" role="dialog" aria-modal="true" aria-label="퍼블리시">
+          <div className="bx-manual-scrim" onClick={() => setPublishOpen(false)} />
+          <article className="bx-manual-sheet bx-pub-sheet">
+            <header className="bx-manual-head">
+              <div>
+                <h2>퍼블리시</h2>
+                <p>만든 사이트를 올릴 수 있는 형태로 내보냅니다. 올리는 일은 직접 하셔도, AI 에이전트에게 맡기셔도 됩니다.</p>
+              </div>
+              <button type="button" onClick={() => setPublishOpen(false)}>
+                닫기
+              </button>
+            </header>
+            <div className="bx-pub-grid">
+              <section className="bx-pub-card">
+                <h3>① 배포 꾸러미 (ZIP)</h3>
+                <p>
+                  <code>index.html</code> · <code>site.json</code> · <code>manifest.json</code> · <code>PUBLISH.md</code> ·{" "}
+                  <code>vercel.json</code>. 풀어서 폴더째 AI 에이전트(Claude Code 등)에게 건네고 「Vercel 에 배포해줘」라고만
+                  하면 됩니다. PUBLISH.md 에 에이전트가 지킬 규칙이 적혀 있습니다.
+                </p>
+                <button type="button" className="bx-pub-primary" onClick={downloadBundle}>
+                  배포 꾸러미 내려받기
+                </button>
+              </section>
+              <section className="bx-pub-card">
+                <h3>② AI 에이전트 지시문</h3>
+                <p>
+                  채팅창에 붙여 넣을 한 문단입니다. 꾸러미와 함께 건네십시오. 무엇을 받았고, 무엇을 하면 되고, 무엇을 건드리면 안
+                  되는지가 들어 있습니다.
+                </p>
+                <button type="button" onClick={copyPrompt}>
+                  {copied ? "복사되었습니다 ✓" : "지시문 복사"}
+                </button>
+              </section>
+              <section className="bx-pub-card">
+                <h3>③ 연동 주소로 보내기</h3>
+                <p>
+                  설정 탭에 적어 둔 주소로 사이트 파일을 JSON 으로 보냅니다. 자체 서버 · n8n · Make · 에이전트가 지켜보는
+                  웹훅에 잇습니다.
+                  {webhook ? (
+                    <>
+                      <br />
+                      <code>{webhook}</code>
+                    </>
+                  ) : (
+                    <>
+                      <br />
+                      <em>아직 주소가 없습니다.</em>
+                    </>
+                  )}
+                </p>
+                <button type="button" disabled={sending === "busy"} onClick={sendWebhook}>
+                  {sending === "busy" ? "보내는 중…" : sending === "ok" ? "보냈습니다 ✓" : sending === "fail" ? "실패 — 주소를 확인하십시오" : "지금 보내기"}
+                </button>
+              </section>
+              <section className="bx-pub-card">
+                <h3>④ 파일로</h3>
+                <p>
+                  HTML 한 장(안에 작업 문서가 심겨 있어 「불러오기」로 다시 열립니다), 또는 작업 문서(JSON)만 따로.
+                </p>
+                <span className="bx-pub-row">
+                  <button type="button" onClick={() => download(downloadName(doc.title, "html"), exportHtml(doc), "text/html")}>
+                    HTML 내보내기
+                  </button>
+                  <button type="button" onClick={() => download(downloadName(doc.title, "json"), serializeDoc(doc), "application/json")}>
+                    저장(JSON)
+                  </button>
+                </span>
+              </section>
+            </div>
+            <p className="bx-pub-foot">
+              직접 올리실 때 — Vercel: vercel.com → Add New → Project 에 꾸러미 폴더 끌어놓기 · Netlify: app.netlify.com/drop ·
+              기존 호스팅: index.html 을 public_html 에 복사.
+            </p>
+          </article>
+        </div>
+      )}
+
       {/* 템플릿 고르기 */}
       {templateOpen && (
         <div className="bx-manual" role="dialog" aria-modal="true" aria-label="템플릿 고르기">
@@ -1204,6 +1610,19 @@ export default function BuilderClient() {
   );
 }
 
+/** 레이아웃 미리보기 — 작은 네모로 뼈대만 그린다 */
+function LayoutThumb({ id }: { id: LayoutId }) {
+  return (
+    <span className="bx-thumb" data-layout={id} aria-hidden="true">
+      <i className="bx-thumb-head" />
+      <i className="bx-thumb-hero" />
+      <i className="bx-thumb-a" />
+      <i className="bx-thumb-b" />
+      <i className="bx-thumb-c" />
+    </span>
+  );
+}
+
 /** 테마 변수를 리액트 style 객체로 — 캔버스도 내보내기와 같은 변수를 쓴다 */
 function cssVarStyle(theme: Theme): React.CSSProperties {
   const style: Record<string, string> = {};
@@ -1279,13 +1698,28 @@ function BackgroundEditor({ value, onChange }: { value: Background; onChange: (b
 }
 
 /** 구역 종류별 내용 항목 — 글자는 화면에서도 고칠 수 있고 여기서도 고칠 수 있다 */
-function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch: Partial<Section>) => void }) {
+function SectionFields({
+  section,
+  sections,
+  theme,
+  onPatch,
+}: {
+  section: Section;
+  /** 링크 고르기에 쓸 구역 목록 */
+  sections: Section[];
+  theme: Theme;
+  onPatch: (patch: Partial<Section>) => void;
+}) {
   const patch = onPatch as (p: Record<string, unknown>) => void;
 
   switch (section.kind) {
     case "header":
       return (
         <>
+          <label className="bx-check">
+            <input type="checkbox" checked={!!section.sticky} onChange={(e) => patch({ sticky: e.target.checked })} />
+            위에 고정 (스크롤해도 따라옴)
+          </label>
           <Field label="로고 그림 (PNG·SVG 권장)" tour="logo">
             <ImagePicker mode="logo" value={section.logoImage ?? ""} onChange={(v) => patch({ logoImage: v })} />
           </Field>
@@ -1314,13 +1748,22 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
           <Field label="오른쪽 버튼">
             <TextInput value={section.cta} onChange={(v) => patch({ cta: v })} />
           </Field>
+          <Field label="오른쪽 버튼 링크">
+            <LinkPicker value={section.ctaHref} sections={sections} onChange={(v) => patch({ ctaHref: v })} />
+          </Field>
           <h3 className="bx-group">메뉴</h3>
+          <p className="bx-hint">메뉴마다 어느 구역으로 내려갈지 정합니다. 편집 화면에서는 눌러도 움직이지 않고, 미리보기에서 동작합니다.</p>
           <ListEditor
             items={section.menu}
             onChange={(menu) => patch({ menu })}
-            make={() => ({ label: "새 메뉴" })}
+            make={(): MenuItem => ({ label: "새 메뉴" })}
             addLabel="메뉴 추가"
-            render={(item, set) => <TextInput value={item.label} onChange={(v) => set({ label: v })} />}
+            render={(item, set) => (
+              <>
+                <TextInput value={item.label} onChange={(v) => set({ label: v })} />
+                <LinkPicker value={item.href} sections={sections} onChange={(v) => set({ href: v })} />
+              </>
+            )}
           />
         </>
       );
@@ -1343,8 +1786,17 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
           <Field label="주 버튼">
             <TextInput value={section.primary} onChange={(v) => patch({ primary: v })} />
           </Field>
+          <Field label="주 버튼 링크">
+            <LinkPicker value={section.primaryHref} sections={sections} onChange={(v) => patch({ primaryHref: v })} />
+          </Field>
           <Field label="보조 버튼">
             <TextInput value={section.secondary} onChange={(v) => patch({ secondary: v })} />
+          </Field>
+          <Field label="보조 버튼 링크">
+            <LinkPicker value={section.secondaryHref} sections={sections} onChange={(v) => patch({ secondaryHref: v })} />
+          </Field>
+          <Field label="삽화 (오른쪽에 섬)">
+            <ArtPicker value={section.art} theme={theme} onChange={(v) => patch({ art: v })} />
           </Field>
           <h3 className="bx-group">성과 숫자</h3>
           <ListEditor
@@ -1381,16 +1833,18 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
           <ListEditor
             items={section.cards}
             onChange={(cards) => patch({ cards })}
-            make={() => ({ no: "00", title: "새 카드", en: "NEW", desc: "설명을 적으세요.", meta: "자세히 보기", image: "" })}
+            make={(): Card => ({ no: "00", title: "새 카드", en: "NEW", desc: "설명을 적으세요.", meta: "자세히 보기", image: "" })}
             addLabel="카드 추가"
-            render={(item, set) => (
+            render={(item, set, i) => (
               <>
+                <IconPicker value={item.icon} onChange={(v) => set({ icon: v })} />
                 <TextInput value={item.no} onChange={(v) => set({ no: v })} placeholder="번호" />
                 <TextInput value={item.title} onChange={(v) => set({ title: v })} placeholder="제목" />
                 <TextInput value={item.en} onChange={(v) => set({ en: v })} placeholder="영문 라벨" />
                 <TextInput area value={item.desc} onChange={(v) => set({ desc: v })} placeholder="설명" />
                 <TextInput value={item.meta} onChange={(v) => set({ meta: v })} placeholder="아래 링크 글자" />
-                <ImagePicker value={item.image} onChange={(v) => set({ image: v })} />
+                <LinkPicker value={item.href} sections={sections} onChange={(v) => set({ href: v })} />
+                <ImagePicker value={item.image} onChange={(v) => set({ image: v })} theme={theme} seed={`${section.id}-${i}`} />
               </>
             )}
           />
@@ -1405,10 +1859,11 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
           <ListEditor
             items={section.steps}
             onChange={(steps) => patch({ steps })}
-            make={() => ({ index: "STEP 00", name: "새 단계", desc: "설명", gate: false })}
+            make={(): Step => ({ index: "STEP 00", name: "새 단계", desc: "설명", gate: false })}
             addLabel="단계 추가"
             render={(item, set) => (
               <>
+                <IconPicker value={item.icon} onChange={(v) => set({ icon: v })} />
                 <TextInput value={item.index} onChange={(v) => set({ index: v })} placeholder="STEP 01" />
                 <TextInput value={item.name} onChange={(v) => set({ name: v })} placeholder="단계 이름" />
                 <TextInput area value={item.desc} onChange={(v) => set({ desc: v })} placeholder="설명" />
@@ -1515,9 +1970,9 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
             onChange={(images) => patch({ images })}
             make={() => ({ url: "", caption: "사진 설명" })}
             addLabel="사진 추가"
-            render={(item, set) => (
+            render={(item, set, i) => (
               <>
-                <ImagePicker value={item.url} onChange={(v) => set({ url: v })} />
+                <ImagePicker value={item.url} onChange={(v) => set({ url: v })} theme={theme} seed={`${section.id}-${i}`} />
                 <TextInput value={item.caption} onChange={(v) => set({ caption: v })} placeholder="설명" />
               </>
             )}
@@ -1534,7 +1989,7 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
           <Field label="제목">
             <TextInput value={section.title} onChange={(v) => patch({ title: v })} />
           </Field>
-          <Field label="본문 (빈 줄로 문단 나눔)">
+          <Field label="본문 (빈 줄로 문단 나눔 · ## 소제목 · - 목록)">
             <textarea rows={10} value={section.body} onChange={(e) => patch({ body: e.target.value })} />
           </Field>
         </>
@@ -1552,16 +2007,53 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
           <Field label="버튼 글자">
             <TextInput value={section.button} onChange={(v) => patch({ button: v })} />
           </Field>
+          <Field label="버튼 링크">
+            <LinkPicker value={section.buttonHref} sections={sections} onChange={(v) => patch({ buttonHref: v })} />
+          </Field>
           <Field label="아래 작은 글씨">
             <TextInput value={section.note} onChange={(v) => patch({ note: v })} />
           </Field>
         </>
       );
 
-    case "board":
+    case "board": {
+      const cats = section.categories ?? [];
       return (
         <>
           <HeadFields section={section} patch={patch} />
+          <Field label="모양">
+            <Choice
+              value={section.style ?? "list"}
+              options={[
+                { value: "list" as const, label: "목록형 (공지·자료실)" },
+                { value: "card" as const, label: "카드형 (소식)" },
+              ]}
+              onChange={(style) => patch({ style })}
+            />
+          </Field>
+          <Field label="말머리 (쉼표로 구분 · 비우면 분류 없음)">
+            <TextInput
+              value={cats.join(", ")}
+              placeholder="공지, 안내, 자료"
+              onChange={(v) => patch({ categories: v.split(",").map((c) => c.trim()).filter(Boolean) })}
+            />
+          </Field>
+          <Field label="한 쪽에 보일 글 수">
+            <Choice
+              value={section.pageSize}
+              options={[
+                { value: 5, label: "5" },
+                { value: 8, label: "8" },
+                { value: 10, label: "10" },
+                { value: 20, label: "20" },
+              ]}
+              onChange={(pageSize) => patch({ pageSize })}
+            />
+          </Field>
+          <label className="bx-check">
+            <input type="checkbox" checked={!!section.search} onChange={(e) => patch({ search: e.target.checked })} />
+            검색 칸 보이기
+          </label>
           <label className="bx-check">
             <input
               type="checkbox"
@@ -1585,23 +2077,137 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
               date: new Date().toISOString().slice(0, 10),
               body: "내용을 적으세요.",
               notice: false,
+              category: cats[0] ?? "",
+              link: "",
             })}
             addLabel="글 추가"
             render={(item, set) => (
               <>
+                {cats.length > 0 && (
+                  <select value={item.category ?? ""} onChange={(e) => set({ category: e.target.value })}>
+                    <option value="">말머리 없음</option>
+                    {cats.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                )}
                 <TextInput value={item.title} onChange={(v) => set({ title: v })} placeholder="제목" />
                 <span className="bx-two">
                   <TextInput value={item.author} onChange={(v) => set({ author: v })} placeholder="작성자" />
                   <TextInput value={item.date} onChange={(v) => set({ date: v })} placeholder="2026-09-01" />
                 </span>
                 <TextInput area value={item.body} onChange={(v) => set({ body: v })} placeholder="내용" />
+                <TextInput value={item.link ?? ""} onChange={(v) => set({ link: v })} placeholder="첨부·링크 주소 (https://…)" />
                 <label className="bx-check">
                   <input type="checkbox" checked={item.notice} onChange={(e) => set({ notice: e.target.checked })} />
-                  공지로 표시
+                  공지로 표시 (맨 위에 고정)
                 </label>
               </>
             )}
           />
+        </>
+      );
+    }
+
+    case "faq":
+      return (
+        <>
+          <HeadFields section={section} patch={patch} />
+          <h3 className="bx-group">질문과 답</h3>
+          <ListEditor
+            items={section.items}
+            onChange={(items) => patch({ items })}
+            make={() => ({ q: "새 질문", a: "답변을 적으세요." })}
+            addLabel="질문 추가"
+            render={(item, set) => (
+              <>
+                <TextInput value={item.q} onChange={(v) => set({ q: v })} placeholder="질문" />
+                <TextInput area value={item.a} onChange={(v) => set({ a: v })} placeholder="답변" />
+              </>
+            )}
+          />
+        </>
+      );
+
+    case "contact":
+      return (
+        <>
+          <HeadFields section={section} patch={patch} />
+          <h3 className="bx-group">연락처 (비우면 그 줄은 빠짐)</h3>
+          <Field label="이메일 (문의가 도착할 주소)">
+            <TextInput value={section.email} onChange={(v) => patch({ email: v })} />
+          </Field>
+          <Field label="전화">
+            <TextInput value={section.phone} onChange={(v) => patch({ phone: v })} />
+          </Field>
+          <Field label="주소">
+            <TextInput value={section.address} onChange={(v) => patch({ address: v })} />
+          </Field>
+          <Field label="운영 시간">
+            <TextInput value={section.hours} onChange={(v) => patch({ hours: v })} />
+          </Field>
+          <h3 className="bx-group">양식</h3>
+          <Field label="받을 주소 (선택 — Formspree · Getform · 자체 API)">
+            <TextInput value={section.endpoint} onChange={(v) => patch({ endpoint: v })} placeholder="https://formspree.io/f/…" />
+          </Field>
+          <p className="bx-hint">
+            비워 두면 방문자의 메일 프로그램이 열려 위 이메일로 보내집니다(서버 불필요). 주소를 넣으면 그 서비스가 문의를
+            받아 메일로 전달합니다.
+          </p>
+          <Field label="보내기 버튼 글자">
+            <TextInput value={section.button} onChange={(v) => patch({ button: v })} />
+          </Field>
+          <Field label="아래 작은 글씨">
+            <TextInput value={section.note} onChange={(v) => patch({ note: v })} />
+          </Field>
+        </>
+      );
+
+    case "map":
+      return (
+        <>
+          <HeadFields section={section} patch={patch} />
+          <Field label="주소 (화면에 보임)">
+            <TextInput value={section.address} onChange={(v) => patch({ address: v })} />
+          </Field>
+          <Field label="지도 검색어 (선택 — 비우면 주소로 찾음)">
+            <TextInput value={section.query} onChange={(v) => patch({ query: v })} placeholder="예: 텐에이아이 서초" />
+          </Field>
+          <Field label={`지도 높이 ${Math.round(Number(section.height) || 360)}px`}>
+            <input
+              type="range"
+              min={200}
+              max={720}
+              step={20}
+              value={Math.round(Number(section.height) || 360)}
+              onChange={(e) => patch({ height: Number(e.target.value) })}
+            />
+          </Field>
+          <p className="bx-hint">지도는 편집 화면에서는 자리만 잡고, 미리보기와 내보낸 파일에서 실제로 뜹니다. API 키가 필요 없습니다.</p>
+          <h3 className="bx-group">교통 · 주차 안내</h3>
+          <ListEditor
+            items={(section.directions ?? []).map((text) => ({ text }))}
+            onChange={(lines) => patch({ directions: lines.map((l) => l.text) })}
+            make={() => ({ text: "새 안내" })}
+            addLabel="줄 추가"
+            render={(item, set) => <TextInput value={item.text} onChange={(v) => set({ text: v })} />}
+          />
+        </>
+      );
+
+    case "video":
+      return (
+        <>
+          <HeadFields section={section} patch={patch} />
+          <Field label="유튜브 주소">
+            <TextInput value={section.url} onChange={(v) => patch({ url: v })} placeholder="https://www.youtube.com/watch?v=…" />
+          </Field>
+          <Field label="영상 아래 설명">
+            <TextInput value={section.caption} onChange={(v) => patch({ caption: v })} />
+          </Field>
+          <p className="bx-hint">watch?v=… · youtu.be/… · shorts/… 어느 형태든 됩니다. 편집 화면에는 썸네일만, 미리보기에서 재생됩니다.</p>
         </>
       );
 
@@ -1623,9 +2229,14 @@ function SectionFields({ section, onPatch }: { section: Section; onPatch: (patch
           <ListEditor
             items={section.links}
             onChange={(links) => patch({ links })}
-            make={() => ({ label: "새 링크" })}
+            make={(): FooterLink => ({ label: "새 링크" })}
             addLabel="링크 추가"
-            render={(item, set) => <TextInput value={item.label} onChange={(v) => set({ label: v })} />}
+            render={(item, set) => (
+              <>
+                <TextInput value={item.label} onChange={(v) => set({ label: v })} />
+                <LinkPicker value={item.href} sections={sections} onChange={(v) => set({ href: v })} />
+              </>
+            )}
           />
         </>
       );

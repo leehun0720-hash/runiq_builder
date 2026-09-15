@@ -37,17 +37,35 @@ export type SectionBase = {
   align: Align;
   scheme: Scheme;
   hidden?: boolean;
+  /** 배경 위에 옅게 까는 무늬 — art.ts 의 PATTERNS 가운데 하나 */
+  pattern?: string;
 };
 
-export type MenuItem = { label: string };
+/**
+ * 링크 — 같은 페이지의 구역(#s-아이디), 바깥 주소(https://…), 메일(mailto:), 전화(tel:).
+ * 비어 있으면 그냥 글자로만 선다. 편집 화면에서는 눌러도 이동하지 않는다.
+ */
+export type MenuItem = { label: string; href?: string };
 export type Stat = { value: string; label: string };
-export type Card = { no: string; title: string; en: string; desc: string; meta: string; image: string };
-export type Step = { index: string; name: string; desc: string; gate: boolean };
+export type Card = { no: string; title: string; en: string; desc: string; meta: string; image: string; href?: string; icon?: string };
+export type Step = { index: string; name: string; desc: string; gate: boolean; icon?: string };
 export type TableRow = { label: string; cells: string[] };
 export type ListItem = { no: string; label: string; meta: string; tags: string[] };
 export type GalleryImage = { url: string; caption: string };
-export type Post = { id: string; title: string; author: string; date: string; body: string; notice: boolean };
-export type FooterLink = { label: string };
+export type Post = {
+  id: string;
+  title: string;
+  author: string;
+  date: string;
+  body: string;
+  notice: boolean;
+  /** 말머리 — 게시판의 분류 목록 가운데 하나 */
+  category?: string;
+  /** 첨부 파일이나 관련 주소 — 자료실에서 쓴다 */
+  link?: string;
+};
+export type FooterLink = { label: string; href?: string };
+export type FaqItem = { q: string; a: string };
 
 export type HeaderSection = SectionBase & {
   kind: "header";
@@ -59,6 +77,9 @@ export type HeaderSection = SectionBase & {
   logoHeight: number;
   menu: MenuItem[];
   cta: string;
+  ctaHref?: string;
+  /** 스크롤해도 위에 붙어 있게 */
+  sticky?: boolean;
 };
 
 export type HeroSection = SectionBase & {
@@ -69,7 +90,11 @@ export type HeroSection = SectionBase & {
   desc: string;
   primary: string;
   secondary: string;
+  primaryHref?: string;
+  secondaryHref?: string;
   stats: Stat[];
+  /** 오른쪽에 서는 삽화 — art.ts 의 ILLUSTRATIONS 가운데 하나. 비우면 없음 */
+  art?: string;
 };
 
 export type CardsSection = SectionBase & {
@@ -127,6 +152,7 @@ export type CtaSection = SectionBase & {
   title: string;
   desc: string;
   button: string;
+  buttonHref?: string;
   note: string;
 };
 
@@ -139,7 +165,62 @@ export type BoardSection = SectionBase & {
   boardKey: string;
   pageSize: number;
   allowWrite: boolean;
+  /** 목록형(공지·자료실) / 카드형(소식·블로그) */
+  style?: "list" | "card";
+  /** 말머리 목록 — 비어 있으면 분류 없이 한 줄로 */
+  categories?: string[];
+  /** 제목·본문 검색 칸 */
+  search?: boolean;
   posts: Post[];
+};
+
+export type FaqSection = SectionBase & {
+  kind: "faq";
+  eyebrow: string;
+  title: string;
+  lead: string;
+  items: FaqItem[];
+};
+
+export type ContactSection = SectionBase & {
+  kind: "contact";
+  eyebrow: string;
+  title: string;
+  lead: string;
+  email: string;
+  phone: string;
+  address: string;
+  hours: string;
+  /**
+   * 문의를 받을 주소(Formspree 같은 폼 수신 서비스). 비우면 방문자의 메일
+   * 프로그램이 열려 위 메일 주소로 보내진다 — 서버 없이도 문의가 닿는다.
+   */
+  endpoint: string;
+  button: string;
+  note: string;
+};
+
+export type MapSection = SectionBase & {
+  kind: "map";
+  eyebrow: string;
+  title: string;
+  lead: string;
+  address: string;
+  /** 지도에서 찾을 검색어 — 비우면 주소를 그대로 찾는다 */
+  query: string;
+  height: number;
+  /** 교통·주차 안내 줄 */
+  directions: string[];
+};
+
+export type VideoSection = SectionBase & {
+  kind: "video";
+  eyebrow: string;
+  title: string;
+  lead: string;
+  /** 유튜브 주소 — 어느 형태로 붙여 넣어도 영상 id를 찾아낸다 */
+  url: string;
+  caption: string;
 };
 
 export type FooterSection = SectionBase & {
@@ -160,6 +241,10 @@ export type Section =
   | RichSection
   | CtaSection
   | BoardSection
+  | FaqSection
+  | ContactSection
+  | MapSection
+  | VideoSection
   | FooterSection;
 
 export type SectionKind = Section["kind"];
@@ -179,12 +264,43 @@ export type Theme = {
   fontSize: number;
 };
 
+/**
+ * 레이아웃 — 같은 구역들을 어떤 골격 위에 놓을지.
+ *
+ * 테마가 「색과 글꼴」이라면 레이아웃은 「뼈대」다. 내용은 그대로 두고 이것만
+ * 바꿔도 전혀 다른 사이트처럼 보인다. 여섯 가지 모두 같은 구역 데이터를 쓰므로
+ * 언제든 서로 바꿀 수 있다.
+ */
+export type LayoutId = "stack" | "boxed" | "sidebar" | "centered" | "split" | "portal";
+
+export const LAYOUT_PRESETS: { id: LayoutId; name: string; desc: string }[] = [
+  { id: "stack", name: "기본형", desc: "구역이 위에서 아래로 가득 찬 띠로 쌓입니다. 가장 흔한 회사 사이트 골격." },
+  { id: "boxed", name: "박스형", desc: "페이지가 가운데 상자에 담기고 바깥은 진한 바탕. 브로슈어·안내문 느낌." },
+  { id: "sidebar", name: "사이드 메뉴형", desc: "메뉴가 왼쪽에 세로로 고정되고 본문은 오른쪽에서 흐릅니다. 포털·자료 사이트." },
+  { id: "centered", name: "센터형", desc: "로고·메뉴·제목이 모두 가운데. 여백이 넉넉한 미니멀 사이트." },
+  { id: "split", name: "분할형", desc: "구역 제목은 왼쪽, 내용은 오른쪽 2단. 편집 매거진 같은 인상." },
+  { id: "portal", name: "포털형", desc: "본문 구역이 2열 격자로 나란히. 게시판·카드가 한눈에 보이는 기관 사이트." },
+];
+
+export const DEFAULT_LAYOUT: LayoutId = "stack";
+
 export type SiteDoc = {
   version: 1;
   title: string;
   theme: Theme;
+  /** 비어 있으면 기본형 — 레이아웃 이전에 저장한 문서도 그대로 열린다 */
+  layout?: LayoutId;
+  /** 검색 결과와 링크 미리보기에 뜨는 한 줄 소개 */
+  description?: string;
+  /** 브라우저 탭에 뜨는 작은 아이콘 — 그림 주소나 올린 파일 */
+  favicon?: string;
   sections: Section[];
 };
+
+/** 문서의 레이아웃 — 모르는 값이 들어와도 기본형으로 선다 */
+export function layoutOf(doc: { layout?: string }): LayoutId {
+  return LAYOUT_PRESETS.some((l) => l.id === doc.layout) ? (doc.layout as LayoutId) : DEFAULT_LAYOUT;
+}
 
 /** 구역 추가 화면에 뜨는 목록 — 이름과 한 줄 설명 */
 export const SECTION_CATALOG: { kind: SectionKind; name: string; desc: string }[] = [
@@ -197,7 +313,11 @@ export const SECTION_CATALOG: { kind: SectionKind; name: string; desc: string }[
   { kind: "gallery", name: "이미지 갤러리", desc: "사진을 격자로 배치" },
   { kind: "rich", name: "글 구역", desc: "제목과 본문 문단" },
   { kind: "cta", name: "강조 배너", desc: "문의·신청을 부르는 띠" },
-  { kind: "board", name: "게시판", desc: "공지·자료실 — 글 목록과 쓰기" },
+  { kind: "board", name: "게시판", desc: "공지·자료실·소식 — 분류·검색·글쓰기" },
+  { kind: "faq", name: "자주 묻는 질문", desc: "질문을 누르면 답이 펼쳐지는 FAQ" },
+  { kind: "contact", name: "문의 폼", desc: "연락처와 문의 양식 — 메일로 받기" },
+  { kind: "map", name: "오시는 길", desc: "지도와 교통·주차 안내" },
+  { kind: "video", name: "동영상", desc: "유튜브 영상을 넣습니다" },
   { kind: "footer", name: "푸터", desc: "회사 정보와 하단 링크" },
 ];
 
@@ -447,6 +567,9 @@ export function newSection(kind: SectionKind): Section {
         boardKey: newId("b"),
         pageSize: 8,
         allowWrite: true,
+        style: "list",
+        categories: ["공지", "안내", "자료"],
+        search: true,
         posts: [
           {
             id: newId("p"),
@@ -455,6 +578,7 @@ export function newSection(kind: SectionKind): Section {
             date: "2026-09-01",
             body: "새 홈페이지를 공개했습니다. 앞으로 이곳에서 소식을 전해 드리겠습니다.",
             notice: true,
+            category: "공지",
           },
           {
             id: newId("p"),
@@ -463,8 +587,70 @@ export function newSection(kind: SectionKind): Section {
             date: "2026-09-03",
             body: "연휴 기간에는 접수만 받고, 회신은 연휴 다음 영업일에 순차적으로 드립니다.",
             notice: false,
+            category: "안내",
+          },
+          {
+            id: newId("p"),
+            title: "회사 소개서 (PDF)",
+            author: "관리자",
+            date: "2026-09-05",
+            body: "회사 소개서를 첨부합니다. 아래 단추를 눌러 내려받으십시오.",
+            notice: false,
+            category: "자료",
+            link: "",
           },
         ],
+      };
+    case "faq":
+      return {
+        ...BASE("자주 묻는 질문"),
+        kind,
+        width: "narrow",
+        eyebrow: "FAQ",
+        title: "자주 묻는 질문",
+        lead: "문의가 잦은 내용을 먼저 모았습니다. 질문을 누르면 답이 펼쳐집니다.",
+        items: [
+          { q: "상담은 어떻게 신청하나요?", a: "아래 문의 폼이나 대표 전화로 신청하시면 담당자가 영업일 기준 1일 이내에 연락드립니다." },
+          { q: "비용은 어떻게 정해지나요?", a: "범위와 기간을 듣고 견적을 드립니다. 첫 상담은 무료입니다." },
+          { q: "어느 지역까지 가능한가요?", a: "전국 어디든 가능하며, 원격으로도 진행합니다." },
+        ],
+      };
+    case "contact":
+      return {
+        ...BASE("문의 폼"),
+        kind,
+        eyebrow: "CONTACT",
+        title: "문의하기",
+        lead: "궁금한 점을 남겨 주시면 담당자가 연락드립니다.",
+        email: "contact@example.com",
+        phone: "02-000-0000",
+        address: "서울특별시 ○○구 ○○로 00, 0층",
+        hours: "평일 09:00 – 18:00 (주말·공휴일 휴무)",
+        endpoint: "",
+        button: "문의 보내기",
+        note: "남겨 주신 연락처는 답변에만 쓰고 보관하지 않습니다.",
+      };
+    case "map":
+      return {
+        ...BASE("오시는 길"),
+        kind,
+        eyebrow: "LOCATION",
+        title: "오시는 길",
+        lead: "방문 전에 연락 주시면 주차 안내를 도와드립니다.",
+        address: "서울특별시 서초구 서초동 1604-19",
+        query: "",
+        height: 360,
+        directions: ["지하철 — ○호선 ○○역 ○번 출구에서 도보 5분", "버스 — ○○, ○○번 ○○정류장 하차", "주차 — 건물 지하 주차장 2시간 무료"],
+      };
+    case "video":
+      return {
+        ...BASE("동영상"),
+        kind,
+        eyebrow: "VIDEO",
+        title: "소개 영상",
+        lead: "유튜브 주소를 붙여 넣으면 영상이 들어갑니다.",
+        url: "",
+        caption: "영상 설명을 적는 자리입니다.",
       };
     case "footer":
       return {

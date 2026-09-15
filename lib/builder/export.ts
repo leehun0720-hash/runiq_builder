@@ -6,17 +6,22 @@
  *
  * 미리보기도 같은 함수를 쓴다. 미리보기에서 본 것과 내려받은 파일이
  * 한 글자도 다르지 않아야 한다.
+ *
+ * 내보낸 HTML 안에는 작업 문서(JSON)도 함께 심는다. 그래서 HTML 파일 하나를
+ * 「불러오기」에 넣으면 다시 편집할 수 있고, AI 에이전트가 파일을 받아도
+ * 구역 구조를 그대로 읽어 손볼 수 있다.
  */
 
 import { GENERATOR } from "./brand";
-import { BUILDER_CSS, escapeHtml, hasBoard, renderSite, themeVars } from "./render";
-import type { SiteDoc } from "./types";
+import { BUILDER_CSS, escapeHtml, hasBoard, renderSite, safeUrl, themeVars } from "./render";
+import { layoutOf, type SiteDoc } from "./types";
 
 /**
  * 게시판 동작 — 내보낸 문서 안에서 홀로 돌아간다.
  *
  * 서버가 없으므로 글은 보는 사람의 브라우저에 남는다. 문서에 심어 둔 글은
  * 씨앗으로 두고, 새로 쓴 글을 앞에 얹는 방식이라 원본이 지워지지 않는다.
+ * 말머리 고르기·검색·쪽 나누기도 여기서 한다.
  */
 const BOARD_SCRIPT = String.raw`
 (function () {
@@ -38,19 +43,23 @@ const BOARD_SCRIPT = String.raw`
     var d = new Date(), p = function (n) { return String(n).padStart(2, "0"); };
     return d.getFullYear() + "-" + p(d.getMonth() + 1) + "-" + p(d.getDate());
   }
+  function text(el, sel) { var n = el.querySelector(sel); return n ? n.textContent : ""; }
 
   Array.prototype.forEach.call(document.querySelectorAll("[data-board]"), function (root) {
     var key = root.getAttribute("data-board");
     var canWrite = root.getAttribute("data-write") === "1";
+    var pageSize = Math.max(1, parseInt(root.getAttribute("data-pagesize"), 10) || 8);
     // 문서에 심어 둔 글 = 씨앗. 방문자가 쓴 글은 저장소에만 쌓이고 위에 얹힌다.
     var seeds = Array.prototype.map.call(root.querySelectorAll(".bf-posts .bf-post"), function (li) {
       return {
         id: li.getAttribute("data-post"),
-        title: li.querySelector(".bf-post-title").textContent,
-        author: li.querySelector(".bf-post-author").textContent,
-        date: li.querySelector(".bf-post-date").textContent,
+        title: text(li, ".bf-post-title"),
+        author: text(li, ".bf-post-author"),
+        date: text(li, ".bf-post-date"),
         body: li.getAttribute("data-body") || "",
-        notice: li.querySelector(".bf-post-badge").textContent.trim() === "공지",
+        category: li.getAttribute("data-cat") || "",
+        link: li.getAttribute("data-link") || "",
+        notice: text(li, ".bf-post-badge").trim() === "공지",
         seed: true
       };
     });
@@ -60,37 +69,101 @@ const BOARD_SCRIPT = String.raw`
     });
     var listEl = root.querySelector(".bf-posts");
     var countEl = root.querySelector(".bf-board-count");
+    var pagesEl = root.querySelector(".bf-board-pages");
+    var catsEl = root.querySelector(".bf-board-cats");
+    var searchEl = root.querySelector('[data-act="search"]');
+    var state = { page: 1, cat: "", q: "" };
     var current = null;
 
-    function all() { return store(key).concat(seeds); }
+    function all() {
+      var list = store(key).concat(seeds);
+      // 공지가 먼저 — 화면에 심어 둔 순서와 같다
+      return list.filter(function (p) { return p.notice; }).concat(list.filter(function (p) { return !p.notice; }));
+    }
+    function filtered() {
+      var q = state.q.toLowerCase();
+      return all().filter(function (p) {
+        if (state.cat && p.category !== state.cat) return false;
+        if (q && (p.title + " " + p.body).toLowerCase().indexOf(q) < 0) return false;
+        return true;
+      });
+    }
     function show(name) {
       Object.keys(views).forEach(function (n) { views[n].hidden = n !== name; });
     }
     function paint() {
-      var posts = all();
-      listEl.innerHTML = posts.map(function (p, i) {
+      var posts = filtered();
+      var total = all().length;
+      var pages = Math.max(1, Math.ceil(posts.length / pageSize));
+      if (state.page > pages) state.page = pages;
+      var start = (state.page - 1) * pageSize;
+      var slice = posts.slice(start, start + pageSize);
+      listEl.innerHTML = slice.map(function (p, i) {
+        var no = p.notice ? "공지" : (posts.length - start - i);
         return '<li class="bf-post" data-id="' + esc(p.id) + '">' +
-          '<span class="bf-post-badge">' + (p.notice ? "공지" : posts.length - i) + "</span>" +
-          '<span class="bf-post-title">' + esc(p.title) + "</span>" +
+          '<span class="bf-post-badge">' + no + "</span>" +
+          '<span class="bf-post-main">' +
+            (p.category ? '<span class="bf-post-cat">' + esc(p.category) + "</span>" : "") +
+            '<span class="bf-post-title">' + esc(p.title) + "</span>" +
+            (p.link ? '<span class="bf-post-clip" aria-label="첨부">📎</span>' : "") +
+          "</span>" +
           '<span class="bf-post-author">' + esc(p.author) + "</span>" +
           '<span class="bf-post-date">' + esc(p.date) + "</span></li>";
-      }).join("");
-      if (countEl) countEl.textContent = "전체 " + posts.length + "건";
+      }).join("") || '<li class="bf-post bf-post--empty"><span class="bf-post-main"><span class="bf-post-title">' +
+        (state.q || state.cat ? "찾는 글이 없습니다" : "아직 글이 없습니다") + "</span></span></li>";
+      if (countEl) countEl.textContent = "전체 " + total + "건" + (posts.length !== total ? " · 찾음 " + posts.length + "건" : "");
+      if (pagesEl) {
+        var html = "";
+        if (pages > 1) {
+          for (var n = 1; n <= pages; n += 1) {
+            html += '<button type="button" data-page="' + n + '"' + (n === state.page ? ' class="is-on"' : "") + ">" + n + "</button>";
+          }
+        }
+        pagesEl.innerHTML = html;
+      }
     }
 
     listEl.addEventListener("click", function (e) {
       var li = e.target.closest(".bf-post");
-      if (!li) return;
+      if (!li || !li.getAttribute("data-id")) return;
       var id = li.getAttribute("data-id");
       var post = all().filter(function (p) { return p.id === id; })[0];
       if (!post) return;
       current = post;
+      views.read.querySelector(".bf-read-cat").textContent = post.category || "";
       views.read.querySelector(".bf-read-title").textContent = post.title;
       views.read.querySelector(".bf-read-meta").textContent = post.author + " · " + post.date;
       views.read.querySelector(".bf-read-body").textContent = post.body || "(내용이 없습니다)";
+      var linkWrap = views.read.querySelector(".bf-read-link");
+      if (linkWrap) {
+        linkWrap.hidden = !post.link;
+        var a = linkWrap.querySelector("a");
+        if (a) a.href = post.link || "#";
+      }
       var del = views.read.querySelector('[data-act="del"]');
       if (del) del.hidden = !!post.seed || !canWrite;
       show("read");
+    });
+
+    if (pagesEl) pagesEl.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-page]");
+      if (!b) return;
+      state.page = parseInt(b.getAttribute("data-page"), 10) || 1;
+      paint();
+    });
+    if (catsEl) catsEl.addEventListener("click", function (e) {
+      var b = e.target.closest("[data-cat]");
+      if (!b) return;
+      state.cat = b.getAttribute("data-cat") || "";
+      state.page = 1;
+      Array.prototype.forEach.call(catsEl.querySelectorAll("button"), function (x) { x.classList.toggle("is-on", x === b); });
+      paint(); show("list");
+    });
+    if (searchEl) searchEl.addEventListener("submit", function (e) {
+      e.preventDefault();
+      state.q = String(new FormData(searchEl).get("q") || "").trim();
+      state.page = 1;
+      paint(); show("list");
     });
 
     root.addEventListener("click", function (e) {
@@ -112,13 +185,16 @@ const BOARD_SCRIPT = String.raw`
         var title = String(f.get("title") || "").trim();
         var author = String(f.get("author") || "").trim();
         var body = String(f.get("body") || "").trim();
+        var category = String(f.get("category") || "").trim();
         if (!title || !author || !body) return;
         var list = store(key);
         list.unshift({
           id: "p" + Date.now().toString(36),
-          title: title, author: author, body: body, date: today(), notice: false
+          title: title, author: author, body: body, date: today(), notice: false, category: category, link: ""
         });
         save(key, list);
+        state.page = 1; state.q = ""; state.cat = "";
+        if (catsEl) Array.prototype.forEach.call(catsEl.querySelectorAll("button"), function (x, i) { x.classList.toggle("is-on", i === 0); });
         paint(); show("list");
       });
     }
@@ -128,25 +204,19 @@ const BOARD_SCRIPT = String.raw`
 })();
 `.trim();
 
-/** 게시판 글 본문은 목록 마크업에 실어 둔다 — 내보낸 파일만으로 읽기가 되도록 */
-function withPostBodies(html: string, doc: SiteDoc): string {
-  let out = html;
-  for (const section of doc.sections) {
-    if (section.kind !== "board") continue;
-    for (const post of section.posts) {
-      const needle = `data-post="${escapeHtml(post.id)}"`;
-      out = out.replace(needle, `${needle} data-body="${escapeHtml(post.body)}"`);
-    }
-  }
-  return out;
-}
+export type ExportOptions = {
+  includeFontLink?: boolean;
+  /** 작업 문서(JSON)를 HTML 안에 심는다 — 그 파일을 다시 불러와 편집할 수 있다 */
+  embedDoc?: boolean;
+};
 
-export type ExportOptions = { includeFontLink?: boolean };
+/** HTML 안에 심는 문서 표식 — 불러오기가 이 id 를 찾는다 */
+export const EMBED_ID = "bf-doc";
 
 /** 문서 → 혼자 서는 HTML 한 장 */
 export function exportHtml(doc: SiteDoc, options: ExportOptions = {}): string {
-  const { includeFontLink = true } = options;
-  const body = withPostBodies(renderSite(doc, false), doc);
+  const { includeFontLink = true, embedDoc = true } = options;
+  const body = renderSite(doc, false);
   /**
    * 웹폰트는 글을 막지 않고 뒤따라 온다.
    * 그냥 stylesheet로 걸면 폰트 서버가 느리거나 막힌 곳에서는 그동안 화면이
@@ -157,15 +227,33 @@ export function exportHtml(doc: SiteDoc, options: ExportOptions = {}): string {
   const fonts = includeFontLink
     ? `\n<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="${fontHref}" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="${fontHref}"></noscript>`
     : "";
+  const description = (doc.description ?? "").trim();
+  const favicon = safeUrl(doc.favicon ?? "");
+  const meta = [
+    description ? `<meta name="description" content="${escapeHtml(description)}">` : "",
+    `<meta property="og:title" content="${escapeHtml(doc.title)}">`,
+    description ? `<meta property="og:description" content="${escapeHtml(description)}">` : "",
+    `<meta property="og:type" content="website">`,
+    favicon ? `<link rel="icon" href="${favicon}">` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+  // 글 속의 < 는 전부 \u003c 로 적는다 — </script> 로 스크립트가 닫히거나 태그로 읽힐 길이 없다.
+  // JSON.parse 는 \u003c 를 그대로 < 로 읽으므로 되읽을 때 손댈 것이 없다.
+  const embedded = embedDoc
+    ? `\n<script type="application/json" id="${EMBED_ID}">${JSON.stringify(doc).replace(/</g, "\\u003c")}</script>`
+    : "";
   return `<!DOCTYPE html>
-<html lang="ko">
+<html lang="ko" data-layout="${layoutOf(doc)}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="generator" content="${escapeHtml(GENERATOR)}">
-<title>${escapeHtml(doc.title)}</title>${fonts}
+<title>${escapeHtml(doc.title)}</title>
+${meta}${fonts}
 <style>
 *{margin:0;padding:0}
+html{scroll-behavior:smooth}
 body{margin:0}
 ${BUILDER_CSS}
 </style>
@@ -174,7 +262,7 @@ ${BUILDER_CSS}
 <div class="bf-root" style="${themeVars(doc.theme)}">
 ${body}
 </div>
-${hasBoard(doc) ? `<script>\n${BOARD_SCRIPT}\n</script>` : ""}
+${hasBoard(doc) ? `<script>\n${BOARD_SCRIPT}\n</script>` : ""}${embedded}
 </body>
 </html>`;
 }
@@ -193,7 +281,6 @@ export function downloadName(title: string, extension: string): string {
     // 경로 구분자와 파일 이름에 못 쓰는 글자
     .replace(/[\\/:*?"<>|]/g, " ")
     // 눈에 보이지 않는 제어 문자
-    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001F\u007F]/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -218,4 +305,16 @@ export function parseDoc(raw: string): SiteDoc | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * JSON 이든, 빌더가 내보낸 HTML 이든 문서를 꺼낸다.
+ * HTML 이면 심어 둔 <script type="application/json" id="bf-doc"> 를 찾는다.
+ */
+export function parseAny(raw: string): SiteDoc | null {
+  const direct = parseDoc(raw);
+  if (direct) return direct;
+  const m = raw.match(new RegExp(`<script type="application/json" id="${EMBED_ID}">([\\s\\S]*?)</script>`));
+  if (!m) return null;
+  return parseDoc(m[1]);
 }

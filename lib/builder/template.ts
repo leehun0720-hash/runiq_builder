@@ -14,11 +14,14 @@
  */
 
 import { BRAND, BRAND_COLORS } from "./brand";
+import { anchorOf } from "./render";
 import {
   THEME_PRESETS,
   newId,
+  type LayoutId,
   type Section,
   type SectionBase,
+  type SectionKind,
   type SiteDoc,
   type Theme,
 } from "./types";
@@ -55,6 +58,9 @@ function noticeBoard(lead: string): Section {
     boardKey: newId("b"),
     pageSize: 8,
     allowWrite: true,
+    style: "list",
+    categories: ["공지", "안내", "자료"],
+    search: true,
     posts: [
       {
         id: newId("p"),
@@ -63,6 +69,7 @@ function noticeBoard(lead: string): Section {
         date: "2026-09-01",
         body: "새 홈페이지를 공개했습니다. 앞으로 이곳에서 소식과 자료를 전해 드리겠습니다.",
         notice: true,
+        category: "공지",
       },
       {
         id: newId("p"),
@@ -71,6 +78,17 @@ function noticeBoard(lead: string): Section {
         date: "2026-09-03",
         body: "문의는 평일 오전 9시부터 오후 6시까지 접수하며, 영업일 기준 1일 이내에 회신드립니다.",
         notice: false,
+        category: "안내",
+      },
+      {
+        id: newId("p"),
+        title: "안내 자료 (PDF)",
+        author: "관리자",
+        date: "2026-09-05",
+        body: "안내 자료를 첨부합니다. 아래 단추를 눌러 내려받으십시오. (파일 주소는 빌더의 「첨부·링크」 칸에 넣습니다)",
+        notice: false,
+        category: "자료",
+        link: "",
       },
     ],
   };
@@ -95,6 +113,145 @@ function customerFooter(brand: string): Section {
   };
 }
 
+/** 고객 템플릿에 붙는 FAQ — 질문은 어느 업종에나 통하는 것으로 */
+function faqBlock(items: { q: string; a: string }[]): Section {
+  return {
+    ...base("자주 묻는 질문", { width: "narrow", background: { kind: "solid", color: "#FFFFFF" } }),
+    kind: "faq",
+    eyebrow: "FAQ",
+    title: "자주 묻는 질문",
+    lead: "문의가 잦은 내용을 먼저 모았습니다. 질문을 누르면 답이 펼쳐집니다.",
+    items,
+  };
+}
+
+/** 문의 폼 — 서버 없이 메일로 닿는다. 받을 주소는 고객이 나중에 채운다 */
+function contactBlock(email: string, phone: string, address: string): Section {
+  return {
+    ...base("문의 폼"),
+    kind: "contact",
+    eyebrow: "CONTACT",
+    title: "문의하기",
+    lead: "궁금한 점을 남겨 주시면 담당자가 영업일 기준 1일 이내에 연락드립니다.",
+    email,
+    phone,
+    address,
+    hours: "평일 09:00 – 18:00 (주말·공휴일 휴무)",
+    endpoint: "",
+    button: "문의 보내기",
+    note: "남겨 주신 연락처는 답변에만 쓰고 보관하지 않습니다.",
+  };
+}
+
+/** 오시는 길 — 주소만 있으면 지도가 선다 */
+function mapBlock(address: string, directions: string[]): Section {
+  return {
+    ...base("오시는 길", { background: { kind: "solid", color: "#FFFFFF" } }),
+    kind: "map",
+    eyebrow: "LOCATION",
+    title: "오시는 길",
+    lead: "방문 전에 연락 주시면 주차를 안내해 드립니다.",
+    address,
+    query: "",
+    height: 360,
+    directions,
+  };
+}
+
+const CUSTOMER_FAQ = [
+  { q: "상담은 어떻게 신청하나요?", a: "아래 문의 폼이나 대표 전화로 신청하시면 담당자가 연락드립니다. 첫 상담은 무료입니다." },
+  { q: "비용은 어떻게 정해지나요?", a: "범위와 기간을 듣고 견적을 드립니다. 견적서에 항목별 금액을 적어 드립니다." },
+  { q: "어느 지역까지 가능한가요?", a: "전국 어디든 가능하며, 원격으로도 진행합니다." },
+];
+
+/**
+ * 템플릿 마무리 — 메뉴·단추에 링크를 잇고, 아이콘·삽화를 얹고, 부록 구역을 끼운다.
+ *
+ * 구역 id 는 만들 때마다 새로 나오므로, 링크는 구역이 다 서고 난 뒤에 종류로
+ * 찾아 잇는다. 「메뉴 글자 → 구역 종류」 만 적어 두면 나머지는 여기서 한다.
+ */
+function finish(
+  doc: SiteDoc,
+  opt: {
+    layout: LayoutId;
+    /** 메뉴 글자 → 그 글자가 가리킬 구역 종류 */
+    menu: Record<string, SectionKind>;
+    /** 카드·단계에 순서대로 붙는 아이콘 */
+    cardIcons?: string[];
+    stepIcons?: string[];
+    /** 히어로 옆 삽화 */
+    art?: string;
+    /** 문의 배너 앞에 끼워 넣는 부록 구역 */
+    extras?: Section[];
+  },
+): SiteDoc {
+  const sections = [...doc.sections];
+  if (opt.extras?.length) {
+    const at = sections.findIndex((s) => s.kind === "cta");
+    sections.splice(at < 0 ? sections.length - 1 : at, 0, ...opt.extras);
+  }
+  const first = (kind: SectionKind) => sections.find((s) => s.kind === kind && !s.hidden);
+  const to = (...kinds: SectionKind[]) => {
+    for (const k of kinds) {
+      const found = first(k);
+      if (found) return anchorOf(found);
+    }
+    return undefined;
+  };
+  const wired = sections.map((s): Section => {
+    switch (s.kind) {
+      case "header":
+        return {
+          ...s,
+          sticky: true,
+          menu: s.menu.map((m) => ({ ...m, href: m.href ?? (opt.menu[m.label] ? to(opt.menu[m.label]) : undefined) })),
+          ctaHref: s.ctaHref ?? to("contact", "cta"),
+        };
+      case "hero":
+        return { ...s, art: s.art ?? opt.art, primaryHref: s.primaryHref ?? to("contact", "cta"), secondaryHref: s.secondaryHref ?? to("cards", "rich", "list") };
+      case "cards":
+        return { ...s, cards: s.cards.map((c, i) => ({ ...c, icon: c.icon ?? opt.cardIcons?.[i] })) };
+      case "steps":
+        return { ...s, steps: s.steps.map((st, i) => ({ ...st, icon: st.icon ?? opt.stepIcons?.[i] })) };
+      case "cta":
+        return { ...s, buttonHref: s.buttonHref ?? to("contact") };
+      case "footer":
+        return {
+          ...s,
+          links: s.links.map((l) => ({
+            ...l,
+            href: l.href ?? (/오시는 길/.test(l.label) ? to("map") : /문의/.test(l.label) ? to("contact", "cta") : undefined),
+          })),
+        };
+      default:
+        return s;
+    }
+  });
+  return { ...doc, layout: opt.layout, sections: wired };
+}
+
+/** 구축 사례 — 카드형 게시판. 사례는 채울 자리로 비워 둔다 */
+function casesBoard(): Section {
+  return {
+    ...base("구축 사례", { background: { kind: "solid", color: "#FFFFFF" } }),
+    kind: "board",
+    eyebrow: "CASES",
+    title: "구축 사례",
+    lead: "어떤 조직에서 무엇을 어떻게 바꿨는지 — 사례는 고객 동의를 받은 것만 올립니다.",
+    boardKey: newId("b"),
+    pageSize: 6,
+    allowWrite: false,
+    style: "card",
+    categories: ["공공", "기업", "교육"],
+    search: false,
+    posts: [
+      { id: newId("p"), title: "○○기관 — 민원 응대 RAG 도입", author: "AX팀", date: "2026-08-20", body: "내부 규정·지침 ○○건을 근거로 답하는 검색 시스템을 내부망에 올렸습니다. (성과 수치는 고객 동의 후 기재)", notice: false, category: "공공" },
+      { id: newId("p"), title: "○○제조 — 품질 보고서 자동화", author: "AX팀", date: "2026-07-10", body: "검사 기록에서 일일 품질 보고서를 자동으로 만드는 흐름을 구축했습니다. (성과 수치는 고객 동의 후 기재)", notice: false, category: "기업" },
+      { id: newId("p"), title: "○○대학 — 교직원 AI 리터러시", author: "교육팀", date: "2026-06-02", body: "교직원 ○○명을 대상으로 3단계 과정을 운영하고 사내 강사 ○명을 길렀습니다.", notice: false, category: "교육" },
+    ],
+  };
+}
+
 /** 상담·문의를 부르는 띠 */
 function contactCta(title: string, desc: string, button: string, note: string): Section {
   return {
@@ -116,7 +273,7 @@ function contactCta(title: string, desc: string, button: string, note: string): 
    ──────────────────────────────────────────────────────────── */
 
 function tenaiDoc(): SiteDoc {
-  return {
+  return finish({
     version: 1,
     title: "TEN AI 소개",
     theme: themeOf("tenai"),
@@ -265,7 +422,22 @@ function tenaiDoc(): SiteDoc {
         links: [{ label: "소개 & 철학" }, { label: "사업영역" }, { label: "파트너십 문의" }],
       },
     ],
-  };
+  }, {
+    layout: "stack",
+    menu: { "소개 & 철학": "rich", 사업영역: "cards", "교육 아카데미": "steps", "소식·Q&A": "board" },
+    cardIcons: ["book", "compass", "cpu", "tool", "layers", "users"],
+    stepIcons: ["search", "compass", "tool", "graduation"],
+    art: "network",
+    extras: [
+      faqBlock([
+        { q: "교육과 컨설팅을 함께 받을 수 있나요?", a: "네. AX 진단에서 시작해 구축과 교육까지 한 팀이 이어서 맡습니다. 교육만 따로 받으실 수도 있습니다." },
+        { q: "망분리 환경에서도 가능한가요?", a: "가능합니다. " + BRAND.model + " 을 온프레미스로 배포해 외부 유출 없이 운영합니다." },
+        { q: "첫 상담은 어떻게 신청하나요?", a: "아래 문의 폼이나 " + BRAND.email + " 로 연락 주시면 담당자가 회신드립니다." },
+      ]),
+      contactBlock(BRAND.email, "", BRAND.addressLines.join(" ")),
+      mapBlock(BRAND.addressLines.join(" "), ["지하철 — 2·3호선 교대역 인근", "주차 — 건물 내 주차 가능 (방문 전 문의)"]),
+    ],
+  });
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -273,7 +445,7 @@ function tenaiDoc(): SiteDoc {
    ──────────────────────────────────────────────────────────── */
 
 function eduDoc(): SiteDoc {
-  return {
+  return finish({
     version: 1,
     title: "AI 교육 과정 안내",
     theme: themeOf("edu"),
@@ -396,7 +568,21 @@ function eduDoc(): SiteDoc {
       ),
       customerFooter("AI 교육 아카데미"),
     ],
-  };
+  }, {
+    layout: "centered",
+    menu: { "과정 소개": "cards", 커리큘럼: "list", "수강 안내": "steps", 공지사항: "board" },
+    cardIcons: ["book", "spark", "code"],
+    stepIcons: ["phone", "clipboard", "graduation", "award"],
+    art: "orbits",
+    extras: [
+      faqBlock([
+        { q: "AI 를 전혀 모르는데 들을 수 있나요?", a: "AI 리터러시 과정은 처음 접하시는 분을 기준으로 설계했습니다. 실습은 그날 업무 자료로 합니다." },
+        { q: "출장 교육도 되나요?", a: "가능합니다. 회사·기관으로 찾아가며, 원격 교육도 병행합니다." },
+        { q: "수료증이 나오나요?", a: "과정을 마치시면 수료증을 드립니다. 사내 강사 과정은 별도 인증을 드립니다." },
+      ]),
+      contactBlock("edu@example.com", "02-000-0000", "○○시 ○○구 ○○로 00, 0층"),
+    ],
+  });
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -404,7 +590,7 @@ function eduDoc(): SiteDoc {
    ──────────────────────────────────────────────────────────── */
 
 function axDoc(): SiteDoc {
-  return {
+  return finish({
     version: 1,
     title: "AX 컨설팅 안내",
     theme: themeOf("tenai"),
@@ -511,7 +697,22 @@ function axDoc(): SiteDoc {
       ),
       customerFooter("AX 컨설팅"),
     ],
-  };
+  }, {
+    layout: "split",
+    menu: { 진단: "steps", 전략: "cards", 구축: "table", 사례: "board" },
+    cardIcons: ["database", "file", "lock"],
+    stepIcons: ["search", "compass", "tool", "users"],
+    art: "blocks",
+    extras: [
+      casesBoard(),
+      faqBlock([
+        { q: "진단은 얼마나 걸리나요?", a: "규모에 따라 2~4주입니다. 업무·데이터·조직을 살펴 보고서로 드립니다." },
+        { q: "기존 시스템과 연결되나요?", a: "그룹웨어·ERP·문서 저장소와 잇습니다. 연결 범위는 진단 단계에서 정합니다." },
+        { q: "구축 뒤 운영은 누가 하나요?", a: "정착 단계에서 운영 규칙과 사내 담당자를 세워 조직이 스스로 굴리게 합니다." },
+      ]),
+      contactBlock("ax@example.com", "02-000-0000", "○○시 ○○구 ○○로 00, 0층"),
+    ],
+  });
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -519,7 +720,7 @@ function axDoc(): SiteDoc {
    ──────────────────────────────────────────────────────────── */
 
 function corpDoc(): SiteDoc {
-  return {
+  return finish({
     version: 1,
     title: "회사 소개",
     theme: themeOf("tenai"),
@@ -608,7 +809,18 @@ function corpDoc(): SiteDoc {
       ),
       customerFooter("회사 이름"),
     ],
-  };
+  }, {
+    layout: "boxed",
+    menu: { 회사소개: "hero", 사업영역: "cards", "제품·서비스": "steps", 문의: "contact" },
+    cardIcons: ["briefcase", "target", "handshake"],
+    stepIcons: ["phone", "clipboard", "file", "checkcircle"],
+    art: "waves",
+    extras: [
+      faqBlock(CUSTOMER_FAQ),
+      contactBlock("contact@example.com", "00-0000-0000", "○○시 ○○구 ○○로 00, 0층"),
+      mapBlock("○○시 ○○구 ○○로 00", ["지하철 — ○호선 ○○역 ○번 출구 도보 5분", "버스 — ○○, ○○번 ○○정류장 하차", "주차 — 건물 지하 주차장 2시간 무료"]),
+    ],
+  });
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -616,7 +828,7 @@ function corpDoc(): SiteDoc {
    ──────────────────────────────────────────────────────────── */
 
 function publicDoc(): SiteDoc {
-  return {
+  return finish({
     version: 1,
     title: "사업 안내",
     theme: themeOf("gov"),
@@ -701,7 +913,19 @@ function publicDoc(): SiteDoc {
       ),
       customerFooter("○○기관"),
     ],
-  };
+  }, {
+    layout: "portal",
+    menu: { "사업 개요": "rich", "추진 과제": "list", "추진 일정": "table", 공지사항: "board" },
+    art: "mesh",
+    extras: [
+      faqBlock([
+        { q: "누가 신청할 수 있나요?", a: "공고문의 지원 대상을 확인하십시오. 대상 요건과 제외 사유가 적혀 있습니다." },
+        { q: "신청 서식은 어디서 받나요?", a: "공지사항 게시판의 「자료」 분류에서 내려받으실 수 있습니다." },
+        { q: "문의는 어디로 하나요?", a: "아래 문의 폼이나 담당 부서 전화로 문의하십시오." },
+      ]),
+      contactBlock("contact@example.go.kr", "00-0000-0000", "○○시 ○○구 ○○로 00 ○○기관"),
+    ],
+  });
 }
 
 /* ────────────────────────────────────────────────────────────
@@ -741,6 +965,7 @@ export function blankDoc(): SiteDoc {
     version: 1,
     title: "새 홈페이지",
     theme: themeOf("tenai"),
+    layout: "stack",
     sections: [],
   };
 }

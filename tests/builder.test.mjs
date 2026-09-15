@@ -135,7 +135,7 @@ test("편집 모드에서만 고쳐 쓸 자리 표시가 붙는다", () => {
 test("내보낸 파일은 혼자 서는 문서다", () => {
   const html = exportHtml(starterDoc());
   assert.match(html, /^<!DOCTYPE html>/);
-  assert.match(html, /<html lang="ko">/);
+  assert.match(html, /<html lang="ko"/);
   assert.match(html, /<meta name="viewport"/);
   // 스타일이 파일 안에 들어 있어야 어디에 올려도 그대로 뜬다
   assert.match(html, /\.bf-sec\{/);
@@ -223,7 +223,7 @@ test("화면에 「?」를 놓은 모든 자리에 사용법이 있다", () => {
   assert.deepEqual(Object.keys(HELP_TOPICS).sort(), [...HELP_IDS].sort());
 });
 
-test("매뉴얼은 구역 11종을 빠짐없이 설명한다", () => {
+test("매뉴얼은 구역 전부를 빠짐없이 설명한다", () => {
   const tables = MANUAL.flatMap((c) => c.blocks.filter((b) => b.kind === "table"));
   const listed = tables.flatMap((t) => t.rows.map((r) => r[0]));
   for (const entry of SECTION_CATALOG) {
@@ -274,7 +274,8 @@ test("로고 높이는 읽을 수 있는 범위를 벗어나지 않는다", () =
 test("로고 자리에도 이상한 주소는 실리지 않는다", () => {
   const doc = blankDoc();
   doc.sections = [{ ...newSection("header"), logoImage: "javascript:alert(1)" }];
-  const html = exportHtml(doc);
+  // 심어 둔 작업 문서(JSON)에는 적힌 그대로 남는다 — 그리는 쪽만 본다
+  const html = exportHtml(doc, { embedDoc: false });
   assert.doesNotMatch(html, /javascript:/);
   // 주소가 거부되면 네모가 대신 선다 — 상표 자리가 비지 않는다
   assert.match(html, /<span class="bf-brand-mark"/);
@@ -312,6 +313,7 @@ test("따라 하기가 짚는 자리는 화면에 실제로 있는 이름이다"
     ".bx-right",
     '[data-tour="logo"]',
     ".bx-catalog",
+    ".bx-layouts",
     ".bx-presets",
     '[data-tour="preview"]',
     '[data-tour="export"]',
@@ -324,7 +326,7 @@ test("따라 하기가 짚는 자리는 화면에 실제로 있는 이름이다"
 });
 
 test("화면을 준비시키는 지시는 정해진 것만 쓴다", () => {
-  const allowed = ["tab:sections", "tab:add", "tab:theme", "select:header", "mode:edit"];
+  const allowed = ["tab:sections", "tab:add", "tab:theme", "tab:layout", "select:header", "mode:edit"];
   for (const step of TOUR_STEPS) {
     if (!step.prepare) continue;
     assert.ok(allowed.includes(step.prepare), `${step.id}의 ${step.prepare}는 화면이 모르는 지시다`);
