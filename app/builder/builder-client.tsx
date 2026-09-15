@@ -898,7 +898,9 @@ export default function BuilderClient() {
       <header className="bx-top">
         <span className="bx-logo">
           {BRAND.product}
-          <small>{BRAND.productEn}</small>
+          <small>
+            {BRAND.productKo} · by {BRAND.company}
+          </small>
         </span>
         <input
           className="bx-title"

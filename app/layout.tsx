@@ -28,7 +28,7 @@ export async function generateMetadata(): Promise<Metadata> {
 
   return {
     metadataBase: new URL(`${protocol}://${host}`),
-    title: `${BRAND.product} | ${BRAND.productEn}`,
+    title: `${BRAND.product} | ${BRAND.productKo}`,
     description:
       "구역을 쌓아 홈페이지를 만들고 HTML 한 장으로 내보내는 제작 도구. 텐에이아이가 중소기업·공공기관 고객에게 제공합니다.",
     icons: { icon: [{ url: "/favicon.svg", type: "image/svg+xml" }] },

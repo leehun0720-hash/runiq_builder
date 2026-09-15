@@ -1,7 +1,7 @@
 /**
- * TEN AI 홈페이지 빌더 — 브랜드 한곳.
+ * Runiq Web Builder — 브랜드 한곳.
  *
- * 이 도구는 텐에이아이가 고객(중소기업·공공기관)에게 제공하는 서비스다.
+ * 이 도구(runiq_web)는 텐에이아이가 고객(중소기업·공공기관)에게 제공하는 서비스다.
  * 도구의 얼굴(이름·색·연락처)은 전부 이 파일에서 나온다. 로고를 바꾸거나
  * 연락처가 달라지면 여기만 고치면 되고, 빌더 본체는 건드릴 일이 없다.
  *
@@ -10,9 +10,16 @@
  */
 
 export const BRAND = {
-  /** 도구 이름 — 화면 왼쪽 위에 선다 */
-  product: "홈페이지 빌더",
-  productEn: "TEN AI SITE BUILDER",
+  /** 앱 식별자 — 저장소·패키지·프로젝트 이름 */
+  appId: "runiq_web",
+  /** 도구 이름 — 화면 왼쪽 위와 대문에 선다 */
+  product: "Runiq Web Builder",
+  productEn: "RUNIQ WEB BUILDER",
+  /** 대문의 큰 글자 — 두 줄로 나눠 세운다 */
+  productMark: "RUNIQ",
+  productMarkSub: "WEB BUILDER",
+  /** 한국어 풀이 — 제목 뒤에 붙는 설명 */
+  productKo: "홈페이지 빌더",
 
   company: "TEN AI",
   companyKo: "텐에이아이",

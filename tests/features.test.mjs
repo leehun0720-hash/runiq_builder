@@ -416,7 +416,7 @@ test("배포 꾸러미는 다섯 파일이 든 올바른 ZIP 이다", () => {
   assert.equal(files.length, 5);
   assert.match(files.find((f) => f.name === "index.html").data, /^<!DOCTYPE html>/);
   assert.equal(JSON.parse(files.find((f) => f.name === "site.json").data).title, doc.title);
-  assert.equal(JSON.parse(files.find((f) => f.name === "manifest.json").data).generator, "TEN AI SITE BUILDER (tenai.kr)");
+  assert.equal(JSON.parse(files.find((f) => f.name === "manifest.json").data).generator, "RUNIQ WEB BUILDER (tenai.kr)");
 
   // CRC32 표준 값 ("123456789" → CBF43926)
   assert.equal(crc32(new TextEncoder().encode("123456789")), 0xcbf43926);

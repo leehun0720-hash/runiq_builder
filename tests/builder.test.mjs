@@ -93,7 +93,7 @@ test("브랜드는 한곳에서 나오고 비어 있지 않다", () => {
 
 test("내보낸 파일은 무엇으로 만들었는지 스스로 말한다", () => {
   const html = exportHtml(starterDoc());
-  assert.match(html, /<meta name="generator" content="TEN AI SITE BUILDER/);
+  assert.match(html, /<meta name="generator" content="RUNIQ WEB BUILDER/);
   assert.ok(GENERATOR.includes(BRAND.site));
 });
 

@@ -1,8 +1,8 @@
 {
-  "name": "tenai-site-builder",
+  "name": "runiq_web",
   "version": "1.0.0",
   "private": true,
-  "description": "TEN AI 홈페이지 빌더 — 구역을 쌓아 사이트를 만들고 HTML 한 장으로 내보내는 제작 도구",
+  "description": "Runiq Web Builder — 구역을 쌓아 사이트를 만들고 HTML 한 장으로 내보내는 제작 도구",
   "engines": {
     "node": ">=22.13.0"
   },

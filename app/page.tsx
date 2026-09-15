@@ -1,21 +1,26 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { BRAND } from "@/lib/builder/brand";
+import { BRAND, BRAND_COLORS } from "@/lib/builder/brand";
 import { LAYOUT_PRESETS, SECTION_CATALOG } from "@/lib/builder/types";
 import { TEMPLATES } from "@/lib/builder/template";
+import { illustrationSvg } from "@/lib/builder/art";
 
 /**
  * 서비스 입구.
  *
- * 빌더는 도구이고, 이 화면은 그 도구를 처음 만나는 고객이 서는 자리다.
- * 무엇을 만들 수 있는지, 얼마나 걸리는지, 결과물이 무엇으로 남는지를
- * 한 화면 안에서 답한다. 설명이 길어지면 도구를 열지 않는다.
+ * 맨 위는 대문이다 — 화면을 가득 채우는 표지에 이름(RUNIQ WEB BUILDER)만 크게
+ * 세우고, 무엇을 하는 도구인지 한 줄로 말한다. 그 아래로 무엇을 만들 수 있는지,
+ * 얼마나 걸리는지, 결과물이 무엇으로 남는지를 이어서 답한다. 설명이 길어지면
+ * 도구를 열지 않는다.
  */
 export const metadata: Metadata = {
-  title: `${BRAND.productEn} — ${BRAND.product}`,
+  title: `${BRAND.product} — ${BRAND.productKo}`,
   description:
     "구역을 쌓아 홈페이지를 만들고 HTML 한 장으로 내보냅니다. 서버도 로그인도 필요 없습니다.",
 };
+
+/** 대문 뒤에 서는 삽화 — 도구 안의 것과 같은 그림을 쓴다 */
+const GATE_ART = illustrationSvg("network", BRAND_COLORS.cyan, "#FFFFFF");
 
 const STEPS = [
   { no: "01", title: "골격을 고릅니다", desc: "여섯 가지 템플릿 중 하나로 시작합니다. 빈 화면에서 시작하지 않습니다." },
@@ -27,10 +32,69 @@ const STEPS = [
 export default function Home() {
   return (
     <main className="tn">
+      {/* ── 대문 ── */}
+      <section className="tn-gate" id="top">
+        <div className="tn-gate-art" aria-hidden="true" dangerouslySetInnerHTML={{ __html: GATE_ART }} />
+        <div className="tn-gate-bar">
+          <span className="tn-gate-brand">
+            {BRAND.company} <i>·</i> {BRAND.productKo}
+          </span>
+          <a className="tn-gate-site" href={BRAND.siteHref} target="_blank" rel="noopener noreferrer">
+            {BRAND.site} ↗
+          </a>
+        </div>
+        <div className="tn-gate-body">
+          <p className="tn-gate-eyebrow">{BRAND.sloganEn}</p>
+          <h1 className="tn-gate-mark">
+            <span>{BRAND.productMark}</span>
+            <span className="tn-gate-mark-sub">{BRAND.productMarkSub}</span>
+          </h1>
+          <p className="tn-gate-tag">
+            홈페이지를 <em>글자 고치듯</em> 만듭니다
+          </p>
+          <p className="tn-gate-lead">
+            구역을 쌓아 사이트를 만들고, 레이아웃과 색을 고르고, HTML 한 장으로 내보냅니다.
+            서버도 로그인도 없습니다. 올리는 일은 AI 에이전트에게 맡길 수 있습니다.
+          </p>
+          <div className="tn-gate-acts">
+            <Link className="tn-btn tn-btn-lg" href="/builder">
+              빌더 열기 →
+            </Link>
+            <a className="tn-btn tn-btn-lg tn-btn-outline" href="#what">
+              둘러보기
+            </a>
+          </div>
+          <ul className="tn-gate-stats">
+            <li>
+              <strong>{TEMPLATES.length}</strong>
+              <span>시작 템플릿</span>
+            </li>
+            <li>
+              <strong>{LAYOUT_PRESETS.length}</strong>
+              <span>레이아웃</span>
+            </li>
+            <li>
+              <strong>{SECTION_CATALOG.length}</strong>
+              <span>구역 부품</span>
+            </li>
+            <li>
+              <strong>1</strong>
+              <span>내보내는 파일</span>
+            </li>
+          </ul>
+        </div>
+        <a className="tn-gate-scroll" href="#what" aria-label="아래로">
+          <span>SCROLL</span>
+          <i />
+        </a>
+      </section>
+
       <header className="tn-top">
         <span className="tn-logo">
-          {BRAND.company}
-          <small>{BRAND.productEn}</small>
+          {BRAND.productMark}
+          <small>
+            {BRAND.productMarkSub} · by {BRAND.company}
+          </small>
         </span>
         <nav className="tn-nav">
           <a href="#what">할 수 있는 일</a>
@@ -44,43 +108,6 @@ export default function Home() {
           빌더 열기 →
         </Link>
       </header>
-
-      <section className="tn-hero">
-        <p className="tn-eyebrow">{BRAND.sloganEn}</p>
-        <h1>
-          홈페이지를 <em>글자 고치듯</em> 만듭니다
-        </h1>
-        <p className="tn-lead">
-          구역을 쌓아 사이트를 만들고, HTML 파일 한 장으로 내보냅니다. 서버도 로그인도 필요
-          없습니다. 만드는 내내 화면에 보이는 그대로가 결과물입니다.
-        </p>
-        <div className="tn-hero-acts">
-          <Link className="tn-btn" href="/builder">
-            빌더 열기
-          </Link>
-          <a className="tn-btn tn-btn-ghost" href="#templates">
-            템플릿 먼저 보기
-          </a>
-        </div>
-        <ul className="tn-stats">
-          <li>
-            <strong>{TEMPLATES.length}</strong>
-            <span>시작 템플릿</span>
-          </li>
-          <li>
-            <strong>{LAYOUT_PRESETS.length}</strong>
-            <span>레이아웃</span>
-          </li>
-          <li>
-            <strong>{SECTION_CATALOG.length}</strong>
-            <span>구역 부품</span>
-          </li>
-          <li>
-            <strong>1</strong>
-            <span>내보내는 파일 수</span>
-          </li>
-        </ul>
-      </section>
 
       <section className="tn-sec" id="what">
         <p className="tn-kicker">WHAT YOU GET</p>
@@ -199,7 +226,9 @@ export default function Home() {
 
       <footer className="tn-foot">
         <div>
-          <strong>{BRAND.company}</strong>
+          <strong>
+            {BRAND.product} <small>by {BRAND.company}</small>
+          </strong>
           <p>{BRAND.tagline}</p>
         </div>
         <div>
